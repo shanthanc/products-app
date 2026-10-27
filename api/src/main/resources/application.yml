@@ -1,0 +1,15 @@
+spring:
+  application:
+    name: products-api
+
+  # Local defaults. Other environments set SPRING_DATASOURCE_URL / _USERNAME / _PASSWORD.
+  datasource:
+    url: jdbc:postgresql://localhost:20028/product
+    username: localadmin
+    password: localpass
+
+  # The schema comes from Flyway only; Hibernate just validates the mapping against it.
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false

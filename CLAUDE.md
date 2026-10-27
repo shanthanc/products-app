@@ -59,3 +59,9 @@ The acceptance criteria in INTENT.md are the checklist for "done".
 ## Keeping this file current
 - When build, run or test commands or project conventions change, propose an update to this file. Don’t edit it without my approval.
 - Don't add progress notes or task status here; that belongs in git history.
+- NEVER save any progress or prompting related details in PLAN.md, CLAUDE.md and INTENT.md.
+
+## IMPORTANT
+- For  stories, create skeletons only: classes, records, method signatures and annotations, with bodies that throw `UnsupportedOperationException("TODO S1.1")`.
+  Don't write implementation logic or tests. I write both.
+- When I ask for help on code I'm writing, explain or give a hint first. Only write the code if I ask for it explicitly.

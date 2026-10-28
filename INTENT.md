@@ -75,7 +75,7 @@ Starts Postgres with one command. The image version is pinned in the compose fil
 
 ## Data model
 
-One table, `products`.
+One table, `product`.
 
 | Column | Type | Rules |
 |---|---|---|

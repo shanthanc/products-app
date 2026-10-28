@@ -53,7 +53,7 @@ products-app/
 │       │       └── ApiExceptionHandler.java   # one @RestControllerAdvice → ProblemDetail
 │       ├── main/resources/
 │       │   ├── application.yml
-│       │   └── db/migration/V1__create_products.sql
+│       │   └── db/migration/V1__create_product.sql
 │       └── test/java/com/shanthan/products/
 │           ├── TestcontainersConfiguration.java
 │           └── product/
@@ -87,7 +87,7 @@ after each slice; the owner commits.
 **S0.1 — Postgres starts with one command and keeps its data**
 - Files: `docker-compose.yml`.
 - Verify: `docker compose up -d` → `docker compose ps` shows `healthy`;
-  `docker compose exec db psql -U products -d product -c 'select uuidv7();'` prints a UUID;
+  `docker compose exec db psql -U admin -d productdatabase -c 'select uuidv7();'` prints a UUID;
   a table created before `docker compose down && docker compose up -d` is still there.
 
 **S0.2 — An empty API boots against Postgres, and its tests run on Testcontainers**
@@ -111,7 +111,7 @@ after each slice; the owner commits.
 ### Slice 1 — create a product, end to end
 
 **S1.1 — `POST /api/products` with a name creates the product; Postgres assigns its id**
-- Files: `V1__create_products.sql`, `Product`, `ProductRepository`, `ProductService.create`,
+- Files: `V1__create_product.sql`, `Product`, `ProductRepository`, `ProductService.create`,
   `ProductController` (POST), `CreateProductRequest`, `ProductResponse`.
 - Tests (integration): POST `{"name":"P1"}` → 201 with a version-7 UUID `id` and `name` = `P1`;
   the table holds exactly one matching row.
@@ -196,10 +196,10 @@ Nothing internal (exception messages, SQL, class names) reaches the response.
 
 ## Database
 
-`api/src/main/resources/db/migration/V1__create_products.sql`:
+`../api/src/main/resources/db/migration/V1__create_product.sql`:
 
 ```sql
-create table products (
+create table product (
     id   uuid primary key default uuidv7(),
     name text not null check (btrim(name) <> '')
 );
@@ -216,7 +216,7 @@ create table products (
 
 ```java
 @Entity
-@Table(name = "products")
+@Table(name = "product")
 class Product {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -259,9 +259,9 @@ perform the insert with `JdbcClient` (`insert ... returning id, name`).
 
 | Setting | Where | Local default | Override |
 |---|---|---|---|
-| Postgres db / user / password | `docker-compose.yml` | `product` / `products` / `products` (local only) | `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD` |
+| Postgres db / user / password | `docker-compose.yml` | `productdatabase` / `admin` / `pass` (local only) | `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD` |
 | Postgres host port | `docker-compose.yml` | `127.0.0.1:20028` | `POSTGRES_PORT` |
-| API datasource | `application.yml` | `jdbc:postgresql://localhost:20028/product` | `SPRING_DATASOURCE_URL`, `_USERNAME`, `_PASSWORD` |
+| API datasource | `application.yml` | `jdbc:postgresql://localhost:20028/productdatabase` | `SPRING_DATASOURCE_URL`, `_USERNAME`, `_PASSWORD` |
 | API port | Spring Boot default | `8080` | `SERVER_PORT` |
 | Client dev port and proxy | `vite.config.ts` | `3000` → `http://localhost:8080` | dev-only |
 
@@ -271,9 +271,9 @@ spring:
   application:
     name: products-api
   datasource:              # local defaults; other environments use SPRING_DATASOURCE_*
-    url: jdbc:postgresql://localhost:20028/product
-    username: products
-    password: products
+    url: jdbc:postgresql://localhost:20028/productdatabase
+    username: admin
+    password: pass
   jpa:
     hibernate:
       ddl-auto: validate   # schema comes from Flyway only
@@ -286,15 +286,15 @@ services:
   db:
     image: postgres:18.6
     environment:
-      POSTGRES_DB: ${POSTGRES_DB:-product}
-      POSTGRES_USER: ${POSTGRES_USER:-products}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-products}   # local-only default
+      POSTGRES_DB: ${POSTGRES_DB:-productdatabase}
+      POSTGRES_USER: ${POSTGRES_USER:-admin}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-pass}   # local-only default
     ports:
       - "127.0.0.1:${POSTGRES_PORT:-20028}:5432"
     volumes:
       - db-data:/var/lib/postgresql   # Postgres 18 image volume path
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-products} -d ${POSTGRES_DB:-product}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-admin} -d ${POSTGRES_DB:-productdatabase}"]
       interval: 5s
       timeout: 3s
       retries: 10

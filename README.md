@@ -50,9 +50,9 @@ Every value has a local default, so nothing needs setting to run locally.
 
 | Setting | Default | Override with |
 |---|---|---|
-| Postgres database / user / password | `product` / `products` / `products` (local only) | `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD` |
+| Postgres database / user / password | `productdatabase` / `admin` / `pass` (local only) | `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD` |
 | Postgres port on the host | `20028` (bound to `127.0.0.1`) | `POSTGRES_PORT` |
-| API datasource | `jdbc:postgresql://localhost:20028/product` | `SPRING_DATASOURCE_URL`, `SPRING_DATASOURCE_USERNAME`, `SPRING_DATASOURCE_PASSWORD` |
+| API datasource | `jdbc:postgresql://localhost:20028/productdatabase` | `SPRING_DATASOURCE_URL`, `SPRING_DATASOURCE_USERNAME`, `SPRING_DATASOURCE_PASSWORD` |
 | API port | `8080` | `SERVER_PORT` |
 | UI dev port | `3000` | fixed in `client/vite.config.ts` |
 
@@ -62,7 +62,7 @@ If port 20028 is already taken, move both the database and the API to another po
 
 ```sh
 POSTGRES_PORT=20029 docker compose up -d
-cd api && SPRING_DATASOURCE_URL=jdbc:postgresql://localhost:20029/product ./gradlew bootRun
+cd api && SPRING_DATASOURCE_URL=jdbc:postgresql://localhost:20029/productdatabase ./gradlew bootRun
 ```
 
 ## API

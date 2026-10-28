@@ -75,9 +75,6 @@ database, reload the page, and `P1` is still listed.
   saved as `SOME PRODUCT NAME`. So `P1`, `p1` and ` P1 ` are the same name, and creating one that
   already exists returns `409 Conflict`. The database enforces this too (`CHECK` and `UNIQUE`).
 
-## How you built it
-
-<!-- TODO: 3–5 bullets: tools used (including AI tools), decisions worth noting, what you'd do differently. -->
 
 ## Tests
 
@@ -124,3 +121,27 @@ cd api && SPRING_DATASOURCE_URL=jdbc:postgresql://localhost:20029/productdatabas
 | `GET /api/v1/products` | List all products, newest first |
 
 Errors use `application/problem+json` (RFC 9457). The full contract is in [docs/PLAN.md](docs/PLAN.md).
+
+## How you built it
+
+- **Spec first.** Before any code I wrote `INTENT.md` myself: goal, scope, design overview, stack,
+  data model and acceptance criteria. It's the source of truth the AI works from.
+- **Guardrails for the AI.** I used Claude Code. I generated `CLAUDE.md` from `INTENT.md` and
+  reworked it into working rules: don't invent business rules, ask before adding dependencies, run
+  the tests before saying done, one slice at a time, never commit. Then I used plan mode to produce
+  `docs/PLAN.md` and reviewed it.
+- **Vertical slices, small stories.** Each feature (create, list) was built end to end, UI → API →
+  DB, and split into stories that each deliver one testable behavior. The AI implemented one story
+  at a time.
+- **Review on every change.** A custom `reviewer` subagent runs automatically through a Claude Code
+  hook after each change. I decided which findings to fix and which didn't apply. Then I reviewed
+  the code myself and tested the happy path and error cases manually before pushing.
+
+## What I'd do differently
+
+- Time-box planning and edge cases. I spent too long on name-validation corner cases while the list
+  feature waited.
+- Write behavioral tests first, alongside `INTENT.md` and `PLAN.md`, so the AI has an executable
+  definition of done.
+- Automate the end-to-end check of create → list (I did it manually for V1).
+- Add Spring Boot Actuator health checks. 

@@ -1,5 +1,12 @@
+import ProductForm from './components/ProductForm'
+
 function App() {
-  return <h1>Products</h1>
+  return (
+    <main>
+      <h1>Products</h1>
+      <ProductForm onCreated={() => {}} />
+    </main>
+  )
 }
 
 export default App

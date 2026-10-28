@@ -1,4 +1,4 @@
-package com.shanthan.products.product;
+package com.shanthan.products.model;
 
 import java.util.UUID;
 

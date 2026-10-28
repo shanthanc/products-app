@@ -1,4 +1,4 @@
-package com.shanthan.products.product;
+package com.shanthan.products.entity;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -9,7 +9,7 @@ import jakarta.persistence.Table;
 import java.util.UUID;
 
 @Entity
-@Table(name = "product")
+@Table(name = "products")
 public class Product {
 
 	@Id
@@ -24,14 +24,14 @@ public class Product {
 	}
 
 	public Product(String name) {
-		throw new UnsupportedOperationException("TODO S1.1");
+		this.name = name;
 	}
 
 	public UUID getId() {
-		throw new UnsupportedOperationException("TODO S1.1");
+		return id;
 	}
 
 	public String getName() {
-		throw new UnsupportedOperationException("TODO S1.1");
+		return name;
 	}
 }

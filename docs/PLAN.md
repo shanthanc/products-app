@@ -30,10 +30,11 @@ products-app/
 ├── .nvmrc                     # 26
 ├── docker-compose.yml         # Postgres only
 ├── .claude/
-│   └── agents/reviewer.md
+│   ├── agents/reviewer.md     # independent reviewer subagent
+│   ├── hooks/review-unreviewed-diff.sh
+│   └── settings.json          # Stop hook: reviewer pass when uncommitted code/config changes
 ├── docs/
-│   ├── PLAN.md
-│   └── adr/0001-uuidv7-primary-key.md
+│   └── PLAN.md
 ├── api/                       # Spring Boot on Java 25, single-module Gradle (Groovy DSL)
 │   ├── build.gradle
 │   ├── settings.gradle        # rootProject.name = 'products-api'
@@ -42,23 +43,33 @@ products-app/
 │   └── src/
 │       ├── main/java/com/shanthan/products/
 │       │   ├── ProductsApiApplication.java
-│       │   ├── product/
-│       │   │   ├── Product.java               # JPA entity; id assigned by Postgres
-│       │   │   ├── ProductRepository.java     # JpaRepository<Product, UUID>
-│       │   │   ├── ProductService.java        # create / list
-│       │   │   ├── ProductController.java     # /api/products
-│       │   │   ├── CreateProductRequest.java  # record(String name)
-│       │   │   └── ProductResponse.java       # record(UUID id, String name)
-│       │   └── error/
-│       │       └── ApiExceptionHandler.java   # one @RestControllerAdvice → ProblemDetail
+│       │   ├── controller/
+│       │   │   └── ProductController.java          # /api/v1/products
+│       │   ├── service/
+│       │   │   └── ProductService.java             # create (normalize name) / list
+│       │   ├── repository/
+│       │   │   └── ProductRepository.java          # JpaRepository<Product, UUID>
+│       │   ├── entity/
+│       │   │   └── Product.java                    # JPA entity; id assigned by Postgres
+│       │   ├── model/
+│       │   │   ├── CreateProductRequest.java       # record(String name)
+│       │   │   └── ProductResponse.java            # record(UUID id, String name)
+│       │   ├── exception/
+│       │   │   └── DuplicateProductNameException.java  # domain exception → 409
+│       │   └── handler/
+│       │       └── ApiExceptionHandler.java        # one @RestControllerAdvice → ProblemDetail
 │       ├── main/resources/
 │       │   ├── application.yml
-│       │   └── db/migration/V1__create_product.sql
+│       │   └── db/migration/V1__create_products.sql
 │       └── test/java/com/shanthan/products/
 │           ├── TestcontainersConfiguration.java
-│           └── product/
-│               ├── ProductControllerTest.java       # @WebMvcTest, no Docker
-│               └── ProductsApiIntegrationTest.java  # @SpringBootTest + Testcontainers
+│           ├── ProductsApiIntegrationTest.java     # @SpringBootTest + Testcontainers, API → DB
+│           ├── controller/
+│           │   └── ProductControllerTest.java      # @WebMvcTest, no Docker
+│           ├── service/
+│           │   └── ProductServiceTest.java         # name normalization, duplicate mapping; no Docker
+│           └── handler/
+│               └── ApiExceptionHandlerTest.java    # @WebMvcTest + test-only controller, no Docker
 └── client/                    # Vite + React + TypeScript
     ├── package.json, package-lock.json, index.html
     ├── vite.config.ts         # port 3000, /api → http://localhost:8080
@@ -66,10 +77,12 @@ products-app/
     └── src/
         ├── main.tsx
         ├── App.tsx                    # owns product state, wires form + list
-        ├── api/products.ts            # the only module that calls the API
-        ├── components/ProductForm.tsx
-        ├── components/ProductList.tsx
-        └── index.css
+        ├── index.css                  # success/error message colors only
+        ├── types/product.ts           # Product, ProblemDetail, FieldError
+        ├── api/products.ts            # the only module that calls the API; ApiError, errorMessage()
+        ├── validation/productName.ts  # validateProductName(): the UI copy of the API's name rules
+        ├── components/ProductForm.tsx # input, submit state, status message
+        └── components/ProductList.tsx # rendering only
 ```
 
 Slice 0 removes generated files that aren't needed (Initializr's `HELP.md` and `.gitignore`,
@@ -94,13 +107,14 @@ after each slice; the owner commits.
 - Files: Initializr project under `api/` (Gradle Groovy, Java 25, group `com.shanthan`,
   package `com.shanthan.products`; dependencies: web, data-jpa, validation, flyway, postgresql,
   testcontainers), `TestcontainersConfiguration`, `application.yml`, dependency trim.
-- Tests: the generated `contextLoads`, against a Testcontainers Postgres.
+- Tests: Initializr's `contextLoads` against a Testcontainers Postgres; removed in S1.1 once
+  `ProductsApiIntegrationTest` boots the full app.
 - Verify: `./gradlew check` green; `./gradlew bootRun` starts and Flyway connects.
 
 **S0.3 — An empty client runs on :3000 and proxies `/api` to the API**
 - Files: `npm create vite@latest client -- --template react-ts`, `.nvmrc`, `vite.config.ts`,
   `App.tsx` reduced to a heading, demo files removed.
-- Verify: `npm run dev` → http://localhost:3000 renders; `curl -i localhost:3000/api/products`
+- Verify: `npm run dev` → http://localhost:3000 renders; `curl -i localhost:3000/api/v1/products`
   reaches the API; `npm run lint`, `npm run build` and `npm audit` pass.
 
 **S0.4 — README gets a fresh clone running; CLAUDE.md gets the real commands**
@@ -110,19 +124,23 @@ after each slice; the owner commits.
 
 ### Slice 1 — create a product, end to end
 
-**S1.1 — `POST /api/products` with a name creates the product; Postgres assigns its id**
-- Files: `V1__create_product.sql`, `Product`, `ProductRepository`, `ProductService.create`,
+**S1.1 — `POST /api/v1/products` with a name creates the product; Postgres assigns its id**
+- Files: `V1__create_products.sql`, `Product`, `ProductRepository`, `ProductService.create`,
   `ProductController` (POST), `CreateProductRequest`, `ProductResponse`.
 - Tests (integration): POST `{"name":"P1"}` → 201 with a version-7 UUID `id` and `name` = `P1`;
   the table holds exactly one matching row.
 - Verify: `curl` the POST; `psql` shows the same row.
 
 **S1.2 — A product without a name is rejected**
-- Files: `@NotBlank` on `CreateProductRequest.name`, `@Valid` in the controller,
-  `ApiExceptionHandler`, `build.gradle` test split.
-- Tests: (controller) `{}`, `{"name":null}`, `{"name":""}`, `{"name":"   "}` → 400
-  `application/problem+json` with `errors[0].field` = `name`, service not called; malformed JSON
-  → 400. (integration) inserting a null or blank name directly fails at the database.
+- Files: `@NotNull` + `@Pattern` (not blank) and `@Size` on `CreateProductRequest.name`, ordered by
+  `@GroupSequence`; `@Valid` in the controller, `ApiExceptionHandler`, `FieldViolation`, `build.gradle` test split.
+- Tests: (controller) `{}`, `{"name":null}`, `{"name":""}`, `{"name":"   "}`, a tab and newline,
+  no-break spaces (U+00A0, U+2007, U+202F), U+001C → 400 `application/problem+json` with
+  `errors[0].field` = `name`, service not called; 51 spaces → 400 with only "Name is required"; a
+  name over 50 characters → 400 (exactly 50 is accepted); names with line breaks inside
+  (`"a\nb"`) → 201; malformed JSON → 400. (integration)
+  inserting a null, empty, untrimmed, lowercase or 51-character name directly fails at the
+  database; SQL in a name is stored as text and not executed.
 - Verify: `curl` with `{}` → 400 problem JSON; `./gradlew test` passes without Docker.
 
 **S1.3 — Unexpected errors return a generic 500 and are logged on the server**
@@ -130,14 +148,19 @@ after each slice; the owner commits.
   logging the exception.
 - Tests (controller): a failing service → 500 problem body containing no internal message or
   class name.
+- Verify: with the database stopped, create a product → the API log shows an
+  `ERROR ... POST /api/v1/products -> 500` line followed by the stack trace (Hibernate may log
+  its own connection error first).
 
 **S1.4 — The UI form creates a product through the API**
-- Files: `api/products.ts` (`createProduct`, types), `ProductForm.tsx`, `App.tsx`.
-- Verify: submit `P1` → `POST /api/products` 201 in DevTools; row appears in `psql`.
+- Files: `types/product.ts`, `api/products.ts` (`createProduct`, `ApiError`, `errorMessage`),
+  `ProductForm.tsx`, `App.tsx`.
+- Verify: submit `P1` → `POST /api/v1/products` 201 in DevTools; row appears in `psql`.
 
 **S1.5 — The form rejects a blank name and shows API errors**
-- Files: `ProductForm.tsx` — blank or whitespace-only name shows "Name is required" without
-  calling the API; API errors show their message.
+- Files: `validation/productName.ts`, `ProductForm.tsx` — blank or whitespace-only name shows "Product creation failed: Name is
+  required" (red) without calling the API; API errors show the same prefix with their message;
+  a successful create shows a green confirmation.
 - Verify: submit blank → inline error, no request sent; with Postgres stopped, submit `P1` → the
   API's error message appears.
 
@@ -145,7 +168,7 @@ Slice 1 done = `./gradlew check` green + browser check.
 
 ### Slice 2 — list products, end to end
 
-**S2.1 — `GET /api/products` returns every saved product, newest first**
+**S2.1 — `GET /api/v1/products` returns every saved product, newest first**
 - Files: `ProductController` (GET), `ProductService.list`, repository query.
 - Tests (integration): empty table → 200 `[]`; after creating `P1` then `P2` → both returned,
   `P2` first.
@@ -165,48 +188,64 @@ restart API and database, reload → still listed) + **fresh-clone check** (foll
 
 ## API contract
 
-Base path `/api`. Requests and successful responses are `application/json`; errors are
+Base path `/api/v1`. Requests and successful responses are `application/json`; errors are
 `application/problem+json` (RFC 9457, Spring's `ProblemDetail`).
 
 | Endpoint | Request | Success | Errors |
 |---|---|---|---|
-| `POST /api/products` | `{"name": "P1"}` — only `name` is read; a client can't set `id` | `201`, `{"id": "<uuid v7>", "name": "P1"}` | `400` missing/blank name or malformed JSON, `415` wrong content type, `500` unexpected |
-| `GET /api/products` | — | `200`, `[{"id": "...", "name": "..."}, ...]`, newest first; `[]` when empty | `500` unexpected |
+| `POST /api/v1/products` | `{"name": "P1"}` — only `name` is read; a client can't set `id` | `201`, `{"id": "<uuid v7>", "name": "P1"}`; the name comes back normalized (`" p1 "` → `"P1"`) | `400` missing/blank name, a name over 50 characters or malformed JSON, `409` name already exists (after normalization), `415` wrong content type, `500` unexpected |
+| `GET /api/v1/products` | — | `200`, `[{"id": "...", "name": "..."}, ...]`, newest first; `[]` when empty | `500` unexpected |
 
 Error body (the UI relies on `status`, `detail` and, when present, `errors`):
 
 ```json
 {
-  "type": "about:blank",
   "title": "Bad Request",
   "status": 400,
   "detail": "Invalid request content.",
-  "instance": "/api/products",
+  "instance": "/api/v1/products",
   "errors": [ { "field": "name", "message": "Name is required" } ]
 }
 ```
 
-A 500 has the same shape without `errors`, and a generic `detail`
-("Something went wrong. Please try again.").
+A 409 or 500 has the same shape without `errors`; a 500's `detail` is generic ("Something went
+wrong. Please try again."). Spring leaves out `type` when it is the default `about:blank`.
 
 Implementation: one `@RestControllerAdvice` extending `ResponseEntityExceptionHandler`, which
-already renders Spring MVC errors as `ProblemDetail`. It adds `errors` for validation failures and
-a catch-all for 500s. 4xx are logged as a single `WARN` line; 5xx as `ERROR` with the exception.
+already renders Spring MVC errors as `ProblemDetail`. It adds `errors` for validation failures, a
+handler for duplicate names (409) and a catch-all for 500s. The handler logs each 4xx as one `WARN`
+line (a 409 is also preceded by Hibernate's own log lines for the failed insert). 5xx are logged as `ERROR` with the exception.
 Nothing internal (exception messages, SQL, class names) reaches the response.
 
 ## Database
 
-`../api/src/main/resources/db/migration/V1__create_product.sql`:
+`../api/src/main/resources/db/migration/V1__create_products.sql`:
 
 ```sql
-create table product (
-    id   uuid primary key default uuidv7(),
-    name text not null check (btrim(name) <> '')
-);
+CREATE TABLE products (
+    id UUID PRIMARY KEY DEFAULT uuidv7(),
+    name TEXT NOT NULL,
+    -- Names are stored normalized: uppercase, never empty, no leading or trailing spaces. The API
+    -- trims and uppercases before saving.
+    CONSTRAINT products_name_normalized CHECK (name <> '' AND name = upper(btrim(name))),
+    CONSTRAINT products_name_max_length CHECK (char_length(name) <= 50),
+    -- Because names are normalized, "P1", "p1" and " P1 " are the same name and can exist only once.
+    CONSTRAINT products_name_unique UNIQUE (name)
+)
 ```
 
-- The `check` mirrors `@NotBlank`: the database rejects empty or whitespace-only names too.
-  Names are stored as sent; nothing is trimmed.
+- "Blank" means empty or only whitespace, including Unicode spaces such as the no-break space
+  (U+00A0): in the API, `@Pattern` requires a character that is neither `\p{javaWhitespace}` nor
+  `\p{Z}`; in the UI, the same character set as a regex in `validation/productName.ts`.
+  `@NotBlank` (`String.isBlank()`) isn't used because it lets no-break spaces through. The length
+  is checked only after the name passes (`@GroupSequence`), so a blank name gets exactly one error. The API trims with `String.strip()`, which removes only characters the
+  blank check also rejects, so a name that passes validation is never stored empty.
+- Names are stored **normalized**: the API trims and uppercases (`toUpperCase(Locale.ROOT)`, so the
+  result doesn't depend on the server's locale); whitespace
+  between words is kept. `products_name_normalized` rejects anything else, so `UNIQUE (name)` alone
+  makes "P1", "p1" and " P1 " the same name. A duplicate is caught by the constraint (not a prior
+  lookup), so concurrent creates can't both succeed. The service recognizes it by SQLState `23505`
+  (unique_violation) and it is returned as `409`.
 - Flyway runs at startup (and for each test context against Testcontainers).
 - `spring.jpa.hibernate.ddl-auto=validate`: Hibernate only checks the entity against the migrated
   schema; it never creates or alters tables.
@@ -216,7 +255,7 @@ create table product (
 
 ```java
 @Entity
-@Table(name = "product")
+@Table(name = "products")
 class Product {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -249,9 +288,12 @@ perform the insert with `JdbcClient` (`insert ... returning id, name`).
   })
   ```
 
-- App code only calls relative URLs (`/api/products`), so there's no API URL to configure and no
+- App code only calls relative URLs (`/api/v1/products`), so there's no API URL to configure and no
   CORS: Vite proxies locally; a reverse proxy does the same elsewhere.
-- `src/api/products.ts` is the only module using `fetch`, and defines the `Product` and error types.
+- Client modules by responsibility, mirroring the API's layers: `types/` (data shapes), `api/` (the
+  only module using `fetch`; also turns any error into a human-readable message), `validation/`
+  (plain functions, no React), `components/` (rendering and local UI state). A `hooks/` folder is
+  added only when components need shared data-fetching state; V1 has none, since `App` owns the list.
 - `App` owns the product list and re-fetches after a create; `ProductForm` owns only its input and
   submit state; list keys are product ids; `useEffect` is used only for fetching.
 
@@ -314,7 +356,7 @@ are added only if an environment needs different behavior, not just different va
 |---|---|---|
 | API contract and validation | `@WebMvcTest` + `MockMvc`, service mocked: status codes, error format, field errors, 500 masking | no |
 | API → DB | `@SpringBootTest` + Testcontainers Postgres: requests through the full stack, then assert on the table; database constraint checks | yes |
-| Service | Covered by the API → DB tests (it only delegates); unit tests added if logic appears | — |
+| Service | `ProductServiceTest`, plain JUnit + Mockito: name normalization and mapping the unique-constraint violation to a duplicate-name error | no |
 | UI | `npm run lint` + `npm run build` (type check); main flow checked manually per slice | — |
 
 Tests use a real Postgres (not H2, which has no `uuidv7()`):
@@ -365,7 +407,7 @@ Backend (versions managed by Spring Boot; nothing pinned by hand):
 |---|---|---|
 | `spring-boot-starter-webmvc` | implementation | REST controllers, JSON, `ProblemDetail` |
 | `spring-boot-starter-data-jpa` | implementation | entity mapping and repository |
-| `spring-boot-starter-validation` | implementation | `@Valid`, `@NotBlank` |
+| `spring-boot-starter-validation` | implementation | `@Valid`, `@NotNull`, `@Pattern`, `@Size` |
 | `spring-boot-starter-flyway` + `flyway-database-postgresql` | implementation | migrations at startup; Postgres support is a separate module |
 | `postgresql` | runtimeOnly | JDBC driver |
 | `spring-boot-starter-webmvc-test` | test | `@WebMvcTest`, `MockMvc`, JUnit, AssertJ, Mockito |
@@ -396,6 +438,7 @@ framework or browser-test framework.
 | The list shows all saved products | S2.1 | S2.2 |
 | Creating `P1` adds it to the list | S1.1 + S2.1 | S2.3 |
 | A product without a name is rejected | S1.2 (API and database) | S1.5 |
+| A name matching an existing one (ignoring case and edge whitespace) is rejected | `ProductServiceTest` (duplicate → exception), `ProductControllerTest` (409), `ProductsApiIntegrationTest` (409 after normalization, DB rejects a duplicate) | create ` p1 ` after `P1` in the browser → red 409 message |
 | Each product gets an auto-generated id | S1.1 | `psql` |
 | Products are still listed after a restart | — | Slice 2 restart check |
 | A fresh clone runs by following the README | — | Slice 2 fresh-clone check |
@@ -404,11 +447,34 @@ framework or browser-test framework.
 
 Points INTENT.md leaves unspecified:
 
-1. **Package:** group `com.shanthan`, root package `com.shanthan.products`.
-2. **"Without a name":** missing, `null`, empty and whitespace-only names are rejected at the API
-   (`@NotBlank`) and the database (`not null` + `check`). Names are not trimmed.
+1. **Packages:** group `com.shanthan`, root package `com.shanthan.products`, organized by layer:
+   `controller`, `service`, `repository`, `entity` (JPA entities), `model` (request/response
+   records), `exception` (domain exceptions), `handler` (`@RestControllerAdvice`). Tests mirror them;
+   the API → DB integration test sits in the root package.
+2. **"Without a name":** missing, `null`, empty and whitespace-only names (Unicode spaces such as
+   U+00A0 included) are rejected in the UI and at the API. The database rejects `null`, empty names and leading/trailing spaces
+   (`not null` + `check`; `btrim` without arguments trims only spaces, which is enough because the
+   API always trims before saving).
 3. **List order:** newest first, by id (UUIDv7 is time-ordered).
 4. **List response:** a plain JSON array.
 5. **Frontend tests:** none automated in V1; type check, lint and a manual browser check per slice.
 6. **Unknown fields in the create request:** ignored; only `name` is read.
-7. **After a create:** the input clears and the list re-fetches; no extra UI messages.
+7. **After a create:** the input clears, the list re-fetches, and a green message confirms it
+   (`Product "P1" created.`). Any failure shows a red `Product creation failed: <reason>`, where the
+   reason is the field error, the API's `detail`, or a generic message.
+8. **API versioning:** major version in the path (`/api/v1/products`); only a breaking change gets
+   `/api/v2`, and additive changes stay in v1.
+9. **Name normalization and uniqueness:** names are trimmed (leading/trailing whitespace) and
+   uppercased before saving; whitespace between words is kept (`"Some Product Name"` →
+   `"SOME PRODUCT NAME"`). Normalized names are unique: creating `" p1 "` when `P1` exists returns
+   `409` ("A product named P1 already exists."). The database enforces both (`CHECK` + `UNIQUE`).
+10. **Maximum name length:** 50 characters, counted as typed (before trimming): `@Size(max = 50)`
+    in the API (`400`, "Name must be at most 50 characters"), the same check in the UI, and
+    `CHECK (char_length(name) <= 50)` in the database. Product names are English, and all three
+    count one per character. Accepted edge case: a few non-English characters get longer when
+    uppercased (`ß` → `SS`), so a name near the limit can pass validation and then fail the
+    database check, which returns a generic `500`.
+11. **SQL in a name is data, not a threat:** names are saved through JPA with bound parameters, so
+    a name like `x'); DROP TABLE products; --` is stored as text and never executed (an
+    integration test proves it). There's no SQL keyword blocklist: it would reject real names
+    ("Select Chair", "Drop Leaf Table") and is easy to bypass. React escapes names when rendering.

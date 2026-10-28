@@ -1,5 +1,5 @@
 import type { JSX } from 'react'
-import type { Product } from '../api/products'
+import type { Product } from '../types/product'
 
 type ProductListProps = {
   products: Product[]

@@ -52,6 +52,8 @@ public class ProductService {
 
 	@Transactional(readOnly = true)
 	public List<ProductResponse> list() {
-		throw new UnsupportedOperationException("TODO S2.1");
+		return productRepository.findAllByOrderByIdDesc().stream()
+				.map(product -> new ProductResponse(product.getId(), product.getName()))
+				.toList();
 	}
 }

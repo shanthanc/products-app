@@ -2,6 +2,7 @@ package com.shanthan.products;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -11,6 +12,7 @@ import com.jayway.jsonpath.JsonPath;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.stream.Collectors;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -21,6 +23,7 @@ import org.springframework.context.annotation.Import;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.test.json.JsonCompareMode;
 import org.springframework.test.web.servlet.MockMvc;
 
 @Tag("integration")
@@ -53,6 +56,34 @@ class ProductsApiIntegrationTest {
 
 		List<Map<String, Object>> rows = jdbcClient.sql("select id, name from products").query().listOfRows();
 		assertThat(rows).containsExactly(Map.of("id", id, "name", "P1"));
+	}
+
+	@Test
+	void listReturnsAnEmptyArrayWhenThereAreNoProducts() throws Exception {
+		mockMvc.perform(get("/api/v1/products"))
+				.andExpect(status().isOk())
+				.andExpect(content().contentType(MediaType.APPLICATION_JSON))
+				.andExpect(content().json("[]", JsonCompareMode.STRICT));
+	}
+
+	@Test
+	void listReturnsEverySavedProductNewestFirst() throws Exception {
+		for (String name : List.of("P1", "P2")) {
+			mockMvc.perform(post("/api/v1/products").contentType(MediaType.APPLICATION_JSON)
+					.content("{\"name\": \"" + name + "\"}"))
+					.andExpect(status().isCreated());
+		}
+		Map<String, UUID> ids = jdbcClient.sql("select name, id from products").query()
+				.listOfRows().stream()
+				.collect(Collectors.toMap(row -> (String) row.get("name"), row -> (UUID) row.get("id")));
+
+		mockMvc.perform(get("/api/v1/products"))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.length()").value(2))
+				.andExpect(jsonPath("$[0].id").value(ids.get("P2").toString()))
+				.andExpect(jsonPath("$[0].name").value("P2"))
+				.andExpect(jsonPath("$[1].id").value(ids.get("P1").toString()))
+				.andExpect(jsonPath("$[1].name").value("P1"));
 	}
 
 	@Test

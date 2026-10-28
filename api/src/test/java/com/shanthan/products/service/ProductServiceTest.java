@@ -13,7 +13,9 @@ import com.shanthan.products.model.CreateProductRequest;
 import com.shanthan.products.model.ProductResponse;
 import com.shanthan.products.repository.ProductRepository;
 import java.sql.SQLException;
+import java.util.List;
 import java.util.Locale;
+import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
@@ -78,6 +80,21 @@ class ProductServiceTest {
 		given(productRepository.save(any())).willThrow(otherViolation);
 
 		assertThatThrownBy(() -> productService.create(new CreateProductRequest("P1"))).isSameAs(otherViolation);
+	}
+
+	@Test
+	void listReturnsTheProductsInTheRepositoryOrder() {
+		Product newer = mock(Product.class);
+		given(newer.getId()).willReturn(UUID.fromString("019a2b3c-4d5e-7f00-8000-000000000002"));
+		given(newer.getName()).willReturn("P2");
+		Product older = mock(Product.class);
+		given(older.getId()).willReturn(UUID.fromString("019a2b3c-4d5e-7f00-8000-000000000001"));
+		given(older.getName()).willReturn("P1");
+		given(productRepository.findAllByOrderByIdDesc()).willReturn(List.of(newer, older));
+
+		assertThat(productService.list()).containsExactly(
+				new ProductResponse(newer.getId(), "P2"),
+				new ProductResponse(older.getId(), "P1"));
 	}
 
 	private static DataIntegrityViolationException integrityViolation(String sqlState) {

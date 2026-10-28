@@ -37,8 +37,14 @@ async function toApiError(response: Response): Promise<ApiError> {
   })
 }
 
+// Newest first; the API decides the order.
 export async function listProducts(): Promise<Product[]> {
-  throw new Error('TODO S2.2')
+  const response = await fetch('/api/v1/products')
+  if (!response.ok) {
+    throw await toApiError(response)
+  }
+  const products: unknown = await response.json()
+  return products as Product[]
 }
 
 export async function createProduct(name: string): Promise<Product> {

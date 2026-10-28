@@ -56,8 +56,10 @@ The UI runs on http://localhost:3000 and proxies `/api` to the API.
 
 ## Verify
 
-Open http://localhost:3000, create a product named `P1`, and confirm the success message appears.
-Creating `p1` next should show "Product creation failed: A product named P1 already exists." (The product list isn't built yet.)
+Open http://localhost:3000, create a product named `P1`, and confirm the success message appears
+and `P1` shows in the first row of the "Saved products" table, with its id. Creating `p1` next
+should show "Product creation failed: A product named P1 already exists." Restart the API and the
+database, reload the page, and `P1` is still listed.
 
 ## Notes
 
@@ -119,6 +121,6 @@ cd api && SPRING_DATASOURCE_URL=jdbc:postgresql://localhost:20029/productdatabas
 | Endpoint | Description |
 |---|---|
 | `POST /api/v1/products` | Create a product from `{"name": "..."}` |
-| `GET /api/v1/products` | List all products (not implemented yet; currently returns `500`) |
+| `GET /api/v1/products` | List all products, newest first |
 
 Errors use `application/problem+json` (RFC 9457). The full contract is in [docs/PLAN.md](docs/PLAN.md).

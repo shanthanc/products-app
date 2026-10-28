@@ -31,6 +31,6 @@ public class ProductController {
 
 	@GetMapping
 	public List<ProductResponse> list() {
-		throw new UnsupportedOperationException("TODO S2.1");
+		return productService.list();
 	}
 }

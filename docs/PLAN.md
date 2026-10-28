@@ -67,7 +67,7 @@ products-app/
 │           ├── controller/
 │           │   └── ProductControllerTest.java      # @WebMvcTest, no Docker
 │           ├── service/
-│           │   └── ProductServiceTest.java         # name normalization, duplicate mapping; no Docker
+│           │   └── ProductServiceTest.java         # name normalization, duplicate mapping, list in repository order; no Docker
 │           └── handler/
 │               └── ApiExceptionHandlerTest.java    # @WebMvcTest + test-only controller, no Docker
 └── client/                    # Vite + React + TypeScript
@@ -169,19 +169,26 @@ Slice 1 done = `./gradlew check` green + browser check.
 ### Slice 2 — list products, end to end
 
 **S2.1 — `GET /api/v1/products` returns every saved product, newest first**
-- Files: `ProductController` (GET), `ProductService.list`, repository query.
+- Files: `ProductController` (GET), `ProductService.list`, repository query
+  (`findAllByOrderByIdDesc`).
 - Tests (integration): empty table → 200 `[]`; after creating `P1` then `P2` → both returned,
-  `P2` first.
+  `P2` first, with their database ids. (controller) 200 array in the service's order; a failure →
+  generic 500. (service) maps the repository's products in order.
 
 **S2.2 — The page shows the list when it loads**
-- Files: `api/products.ts` (`listProducts`), `ProductList.tsx` (loading and error states, keyed
-  by id), `App.tsx` (fetch on mount).
+- Files: `api/products.ts` (`listProducts`), `ProductList.tsx` ("Saved products" heading;
+  "Loading products…" marked as a status (`role="status"`), a red "Could not load products:
+  <reason>", "No products yet." when empty and no error; otherwise a table with ID and Name
+  columns, one row per product keyed by id), `App.tsx` (fetch on mount; a stale response is
+  ignored).
 - Verify: with rows in the DB, the page lists them newest first; with the API stopped, the error
   state shows.
 
 **S2.3 — Creating a product adds it to the list**
-- Files: `App.tsx` — re-fetch the list after a successful create.
-- Verify: create `P1` → it appears at the top of the list.
+- Files: `App.tsx` — re-fetch the list after a successful create (a counter in the effect's
+  dependencies); the current list stays visible while it reloads. If the reload fails, the error
+  shows above the list that is already loaded.
+- Verify: create `P1` → it appears in the first row of the table, with its id.
 
 Slice 2 done = `./gradlew check` green + browser check + **restart check** (create products,
 restart API and database, reload → still listed) + **fresh-clone check** (follow the README only).
@@ -295,7 +302,7 @@ perform the insert with `JdbcClient` (`insert ... returning id, name`).
   (plain functions, no React), `components/` (rendering and local UI state). A `hooks/` folder is
   added only when components need shared data-fetching state; V1 has none, since `App` owns the list.
 - `App` owns the product list and re-fetches after a create; `ProductForm` owns only its input and
-  submit state; list keys are product ids; `useEffect` is used only for fetching.
+  submit state; table row keys are product ids; `useEffect` is used only for fetching.
 
 ## Configuration and environments
 
@@ -356,7 +363,7 @@ are added only if an environment needs different behavior, not just different va
 |---|---|---|
 | API contract and validation | `@WebMvcTest` + `MockMvc`, service mocked: status codes, error format, field errors, 500 masking | no |
 | API → DB | `@SpringBootTest` + Testcontainers Postgres: requests through the full stack, then assert on the table; database constraint checks | yes |
-| Service | `ProductServiceTest`, plain JUnit + Mockito: name normalization and mapping the unique-constraint violation to a duplicate-name error | no |
+| Service | `ProductServiceTest`, plain JUnit + Mockito: name normalization, mapping the unique-constraint violation to a duplicate-name error, and list mapping in repository order | no |
 | UI | `npm run lint` + `npm run build` (type check); main flow checked manually per slice | — |
 
 Tests use a real Postgres (not H2, which has no `uuidv7()`):
@@ -455,7 +462,8 @@ Points INTENT.md leaves unspecified:
    U+00A0 included) are rejected in the UI and at the API. The database rejects `null`, empty names and leading/trailing spaces
    (`not null` + `check`; `btrim` without arguments trims only spaces, which is enough because the
    API always trims before saving).
-3. **List order:** newest first, by id (UUIDv7 is time-ordered).
+3. **List order:** newest first, determined by id order (`ORDER BY id DESC`): a UUID v7 starts
+   with its creation timestamp.
 4. **List response:** a plain JSON array.
 5. **Frontend tests:** none automated in V1; type check, lint and a manual browser check per slice.
 6. **Unknown fields in the create request:** ignored; only `name` is read.

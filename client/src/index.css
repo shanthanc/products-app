@@ -5,3 +5,18 @@
 .message-error {
   color: #cf222e;
 }
+
+.product-table {
+  border-collapse: collapse;
+}
+
+.product-table th,
+.product-table td {
+  border: 1px solid #d0d7de;
+  padding: 0.25rem 0.75rem;
+  text-align: left;
+}
+
+.product-table td:first-child {
+  font-family: monospace;
+}

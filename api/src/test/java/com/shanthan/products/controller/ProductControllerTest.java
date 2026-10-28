@@ -5,6 +5,7 @@ import static org.hamcrest.Matchers.not;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.verifyNoInteractions;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -14,6 +15,7 @@ import com.shanthan.products.exception.DuplicateProductNameException;
 import com.shanthan.products.model.CreateProductRequest;
 import com.shanthan.products.model.ProductResponse;
 import com.shanthan.products.service.ProductService;
+import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -142,6 +144,33 @@ class ProductControllerTest {
 				.andExpect(jsonPath("$.status").value(409))
 				.andExpect(jsonPath("$.detail").value("A product named P1 already exists."))
 				.andExpect(jsonPath("$.instance").value("/api/v1/products"));
+	}
+
+	@Test
+	void listReturns200WithTheProductsInTheServiceOrder() throws Exception {
+		UUID newer = UUID.fromString("019a2b3c-4d5e-7f00-8000-000000000002");
+		UUID older = UUID.fromString("019a2b3c-4d5e-7f00-8000-000000000001");
+		given(productService.list()).willReturn(List.of(new ProductResponse(newer, "P2"), new ProductResponse(older, "P1")));
+
+		mockMvc.perform(get("/api/v1/products"))
+				.andExpect(status().isOk())
+				.andExpect(content().contentType(MediaType.APPLICATION_JSON))
+				.andExpect(jsonPath("$.length()").value(2))
+				.andExpect(jsonPath("$[0].id").value(newer.toString()))
+				.andExpect(jsonPath("$[0].name").value("P2"))
+				.andExpect(jsonPath("$[1].id").value(older.toString()))
+				.andExpect(jsonPath("$[1].name").value("P1"));
+	}
+
+	@Test
+	void listErrorsReturnAGeneric500() throws Exception {
+		given(productService.list()).willThrow(new IllegalStateException("connection to db-secret-host refused"));
+
+		mockMvc.perform(get("/api/v1/products"))
+				.andExpect(status().isInternalServerError())
+				.andExpect(content().contentType(MediaType.APPLICATION_PROBLEM_JSON))
+				.andExpect(jsonPath("$.detail").value("Something went wrong. Please try again."))
+				.andExpect(content().string(not(containsString("db-secret-host"))));
 	}
 
 	@Test

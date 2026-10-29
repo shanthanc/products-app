@@ -1,6 +1,7 @@
 package com.shanthan.products.controller;
 
 import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.hasItem;
 import static org.hamcrest.Matchers.not;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.BDDMockito.given;
@@ -53,7 +54,6 @@ class ProductControllerTest {
 			{"name": ""}""", """
 			{"name": "   "}""", """
 			{"name": "\\t\\n"}""", """
-			{"name": "\\u00a0\\u2007\\u202f"}""", """
 			{"name": "\\u001c"}""" })
 	void createRejectsAMissingOrBlankName(String body) throws Exception {
 		mockMvc.perform(post("/api/v1/products").contentType(MediaType.APPLICATION_JSON).content(body))
@@ -63,9 +63,35 @@ class ProductControllerTest {
 				.andExpect(jsonPath("$.detail").value("Invalid request content."))
 				.andExpect(jsonPath("$.instance").value("/api/v1/products"))
 				.andExpect(jsonPath("$.errors[0].field").value("name"))
-				.andExpect(jsonPath("$.errors[0].message").value("Name is required"));
+				// Blank names with tabs or other non-space whitespace also break the allowed characters.
+				.andExpect(jsonPath("$.errors[*].message", hasItem("Name is required")));
 
 		verifyNoInteractions(productService);
+	}
+
+	@ParameterizedTest
+	@ValueSource(strings = { "1P", "_P1", "-P1", "&P1", "  1P", " -P1", "Kid's Chair", "4.5L Pot", "Café", "a\\tb",
+			"a\\nb", "P1\\n", "\\u00a0P1", "P1\\u200b" })
+	void createRejectsANameThatDoesNotStartWithALetterOrHasOtherCharacters(String name) throws Exception {
+		mockMvc.perform(post("/api/v1/products").contentType(MediaType.APPLICATION_JSON)
+				.content("{\"name\": \"" + name + "\"}"))
+				.andExpect(status().isBadRequest())
+				.andExpect(content().contentType(MediaType.APPLICATION_PROBLEM_JSON))
+				.andExpect(jsonPath("$.errors.length()").value(1))
+				.andExpect(jsonPath("$.errors[0].field").value("name"))
+				.andExpect(jsonPath("$.errors[0].message")
+						.value("Name must start with a letter and contain only letters, numbers, spaces and - & _"));
+
+		verifyNoInteractions(productService);
+	}
+
+	@Test
+	void createAcceptsLettersDigitsSpacesAndTheAllowedSymbolsWithSurroundingSpaces() throws Exception {
+		given(productService.create(any())).willReturn(new ProductResponse(UUID.randomUUID(), "SALT & PEPPER-T_2"));
+
+		mockMvc.perform(post("/api/v1/products").contentType(MediaType.APPLICATION_JSON).content("""
+				{"name": "  Salt & Pepper-T_2  "}"""))
+				.andExpect(status().isCreated());
 	}
 
 	@Test
@@ -75,32 +101,9 @@ class ProductControllerTest {
 				.andExpect(status().isBadRequest())
 				.andExpect(content().contentType(MediaType.APPLICATION_PROBLEM_JSON))
 				.andExpect(jsonPath("$.errors[0].field").value("name"))
-				.andExpect(jsonPath("$.errors[0].message").value("Name must be at most 50 characters"));
+				.andExpect(jsonPath("$.errors[0].message").value("Name must not exceed 50 characters"));
 
 		verifyNoInteractions(productService);
-	}
-
-	@Test
-	void createRejectsABlankNameLongerThan50CharactersWithOnlyTheRequiredError() throws Exception {
-		mockMvc.perform(post("/api/v1/products").contentType(MediaType.APPLICATION_JSON)
-				.content("{\"name\": \"" + " ".repeat(51) + "\"}"))
-				.andExpect(status().isBadRequest())
-				.andExpect(jsonPath("$.errors.length()").value(1))
-				.andExpect(jsonPath("$.errors[0].message").value("Name is required"));
-
-		verifyNoInteractions(productService);
-	}
-
-	@ParameterizedTest
-	@ValueSource(strings = { """
-			{"name": "p1\\n"}""", """
-			{"name": "a\\nb"}""", """
-			{"name": "\\r\\np1"}""" })
-	void createAcceptsANameContainingLineBreaks(String body) throws Exception {
-		given(productService.create(any())).willReturn(new ProductResponse(UUID.randomUUID(), "P1"));
-
-		mockMvc.perform(post("/api/v1/products").contentType(MediaType.APPLICATION_JSON).content(body))
-				.andExpect(status().isCreated());
 	}
 
 	@Test

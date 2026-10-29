@@ -101,12 +101,24 @@ class ProductsApiIntegrationTest {
 	@Test
 	void createStoresTheNameTrimmedAndUppercasedKeepingSpacesBetweenWords() throws Exception {
 		mockMvc.perform(post("/api/v1/products").contentType(MediaType.APPLICATION_JSON).content("""
-				{"name": " Some  Product Name\\t"}"""))
+				{"name": "  Some  Product Name  "}"""))
 				.andExpect(status().isCreated())
 				.andExpect(jsonPath("$.name").value("SOME  PRODUCT NAME"));
 
 		assertThat(jdbcClient.sql("select name from products").query(String.class).single())
 				.isEqualTo("SOME  PRODUCT NAME");
+	}
+
+	// A name using every allowed symbol passes both the API and the database checks (a mismatch would be a 500).
+	@Test
+	void createStoresANameWithTheAllowedSymbols() throws Exception {
+		mockMvc.perform(post("/api/v1/products").contentType(MediaType.APPLICATION_JSON).content("""
+				{"name": "  Salt & Pepper-T_2  "}"""))
+				.andExpect(status().isCreated())
+				.andExpect(jsonPath("$.name").value("SALT & PEPPER-T_2"));
+
+		assertThat(jdbcClient.sql("select name from products").query(String.class).single())
+				.isEqualTo("SALT & PEPPER-T_2");
 	}
 
 	@Test
@@ -118,21 +130,27 @@ class ProductsApiIntegrationTest {
 					.andExpect(jsonPath("$.name").value("P1"));
 		}
 
-		List<Map<String, Object>> rows = jdbcClient.sql("select id, name from products").query().listOfRows();
+		List<Map<String, Object>> rows = jdbcClient.sql("select id, name from products order by id desc").query().listOfRows();
 		assertThat(rows).hasSize(2).allSatisfy(row -> assertThat(row.get("name")).isEqualTo("P1"));
 		assertThat(rows.get(0).get("id")).isNotEqualTo(rows.get(1).get("id"));
+
+		mockMvc.perform(get("/api/v1/products"))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.length()").value(2))
+				.andExpect(jsonPath("$[0].id").value(rows.get(0).get("id").toString()))
+				.andExpect(jsonPath("$[0].name").value("P1"))
+				.andExpect(jsonPath("$[1].id").value(rows.get(1).get("id").toString()))
+				.andExpect(jsonPath("$[1].name").value("P1"));
 	}
 
-	// Names reach the database as bound parameters, never as SQL text, so SQL in a name is stored as plain text.
+	// Quotes, parentheses and semicolons aren't allowed in a name, so SQL in a name is rejected before it reaches the database.
 	@Test
-	void sqlInANameIsStoredAsTextAndNotExecuted() throws Exception {
+	void sqlInANameIsRejectedAndNotExecuted() throws Exception {
 		mockMvc.perform(post("/api/v1/products").contentType(MediaType.APPLICATION_JSON).content("""
 				{"name": "x'); DROP TABLE products; --"}"""))
-				.andExpect(status().isCreated())
-				.andExpect(jsonPath("$.name").value("X'); DROP TABLE PRODUCTS; --"));
+				.andExpect(status().isBadRequest());
 
-		assertThat(jdbcClient.sql("select name from products").query(String.class).single())
-				.isEqualTo("X'); DROP TABLE PRODUCTS; --");
+		assertThat(jdbcClient.sql("select count(*) from products").query(Long.class).single()).isZero();
 	}
 
 	@Test
@@ -141,6 +159,18 @@ class ProductsApiIntegrationTest {
 
 		assertThatThrownBy(() -> jdbcClient.sql("insert into products (name) values (?)").param("B".repeat(51)).update())
 				.isInstanceOf(DataIntegrityViolationException.class);
+	}
+
+	@Test
+	void databaseRejectsANameThatDoesNotStartWithALetterOrHasOtherCharacters() {
+		jdbcClient.sql("insert into products (name) values ('SALT & PEPPER-T_2  3')").update();
+
+		for (String name : List.of("1P", "_P1", "-P1", "&P1", "KID'S CHAIR", "4.5L POT", "CAF\u00c9", "A\tB", "\u00a0P1",
+				"P1\u200b")) {
+			assertThatThrownBy(() -> jdbcClient.sql("insert into products (name) values (?)").param(name).update())
+					.as("'%s'", name)
+					.isInstanceOf(DataIntegrityViolationException.class);
+		}
 	}
 
 	@Test

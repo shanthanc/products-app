@@ -1,20 +1,15 @@
 package com.shanthan.products.model;
 
-import jakarta.validation.GroupSequence;
-import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 
-// The length is checked only once the name is present, so a blank name gets exactly one error.
-@GroupSequence({ CreateProductRequest.class, CreateProductRequest.LengthCheck.class })
 public record CreateProductRequest(
-		@NotNull(message = "Name is required")
-		// Needs at least one character that is neither Java whitespace (what strip() removes) nor a
-		// Unicode space separator (e.g. no-break space U+00A0), so a spaces-only name is rejected.
-		@Pattern(regexp = "(?s).*[^\\p{javaWhitespace}\\p{Z}].*", message = "Name is required")
-		@Size(max = 50, message = "Name must be at most {max} characters", groups = LengthCheck.class)
+		@NotBlank(message = "Name is required")
+		// After optional leading spaces: a letter, then only letters, digits, spaces and - & _. Spaces-only
+		// and empty names also match, so they get just the "required" error.
+		@Pattern(regexp = " *([A-Za-z][A-Za-z0-9 &_-]*)?",
+				message = "Name must start with a letter and contain only letters, numbers, spaces and - & _")
+		@Size(max = 50, message = "Name must not exceed 50 characters")
 		String name) {
-
-	interface LengthCheck {
-	}
 }

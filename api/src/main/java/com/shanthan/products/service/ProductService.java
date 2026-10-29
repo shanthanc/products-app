@@ -18,10 +18,6 @@ public class ProductService {
 		this.productRepository = productRepository;
 	}
 
-	// "P1", "p1" and " P1 " are all stored as "P1": trimmed and uppercased; whitespace between words is kept.
-	// strip() removes only whitespace the request's blank check also rejects, so a valid name never
-	// ends up empty. Locale.ROOT keeps the result independent of the server's locale (in Turkish,
-	// "pi" would otherwise become "Pİ").
 	static String normalizeName(String name) {
 		return name.strip().toUpperCase(Locale.ROOT);
 	}

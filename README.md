@@ -45,7 +45,7 @@ cd api && ./gradlew bootRun
 
 The API runs on http://localhost:8080 and applies any pending migrations on startup. Start the
 database first. If the API stops with "Migration checksum mismatch for migration version 1", your
-database ran an earlier V1 (names were unique then): run `docker compose down -v`, which deletes
+database ran an earlier version of V1: run `docker compose down -v`, which deletes
 local data, then start again.
 
 ## Start frontend
@@ -68,9 +68,13 @@ both are still listed.
 - The stack is the preferred one: React, Java Spring Boot and Postgres.
 - `id` is a UUID v7 that Postgres generates (`uuidv7()`, native in Postgres 18). The app never
   generates ids.
-- A missing, empty or whitespace-only `name` (including no-break spaces) is rejected by the UI and the API (`400`, with a field
+- A missing, empty or whitespace-only `name` is rejected by the UI and the API (`400`, with a field
   error). The database backs this up: `NOT NULL`, and a `CHECK` that rejects an empty name or one
   with leading or trailing spaces.
+- A name is plain English ASCII: after trimming, it starts with a letter and contains only
+  letters, digits, spaces and `-`, `&`, `_` (`Salt & Pepper` is fine; `Kid's Chair`, `Café` or `1P`
+  are rejected). The UI, the API (`400`) and the database
+  (`CHECK`) all enforce this.
 - A name may be at most 50 characters, counted as typed. Longer names are rejected by the UI, the
   API (`400`) and the database.
 - Names are stored trimmed and uppercase, with spaces between words kept: `" Some Product Name "` is

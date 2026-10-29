@@ -130,15 +130,17 @@ after each slice; the owner commits.
 - Verify: `curl` the POST; `psql` shows the same row.
 
 **S1.2 — A product without a name is rejected**
-- Files: `@NotNull` + `@Pattern` (not blank) and `@Size` on `CreateProductRequest.name`, ordered by
-  `@GroupSequence`; `@Valid` in the controller, `ApiExceptionHandler`, `FieldViolation`, `build.gradle` test split.
+- Files: `@NotBlank`, `@Pattern` (allowed characters, decision 12) and `@Size` on `CreateProductRequest.name`; `@Valid` in the controller, `ApiExceptionHandler`, `FieldViolation`, `build.gradle` test split.
 - Tests: (controller) `{}`, `{"name":null}`, `{"name":""}`, `{"name":"   "}`, a tab and newline,
-  no-break spaces (U+00A0, U+2007, U+202F), U+001C → 400 `application/problem+json` with
-  `errors[0].field` = `name`, service not called; 51 spaces → 400 with only "Name is required"; a
-  name over 50 characters → 400 (exactly 50 is accepted); names with line breaks inside
-  (`"a\nb"`) → 201; malformed JSON → 400. (integration)
-  inserting a null, empty, untrimmed, lowercase or 51-character name directly fails at the
-  database; SQL in a name is stored as text and not executed.
+  U+001C → 400 `application/problem+json` with `errors[0].field` = `name` and "Name is required",
+  service not called; a name not starting with a letter, also after leading spaces, or with other
+  characters (`1P`, `  1P`, `-P1`, `Kid's Chair`, `Café`, a tab or line break inside or at the
+  end, a no-break or zero-width space) → 400 with only the allowed-characters error;
+  `"  Salt & Pepper-T_2  "` → 201; a name over 50 characters → 400 (exactly 50 is accepted);
+  malformed JSON → 400. (integration) `"  Salt & Pepper-T_2  "` → 201 and stored as
+  `SALT & PEPPER-T_2`, so a name using every allowed symbol passes the database checks;
+  inserting a null, empty, untrimmed, lowercase, 51-character or disallowed-character name
+  directly fails at the database; SQL in a name is rejected with 400 and not executed.
 - Verify: `curl` with `{}` → 400 problem JSON; `./gradlew test` passes without Docker.
 
 **S1.3 — Unexpected errors return a generic 500 and are logged on the server**
@@ -232,26 +234,31 @@ CREATE TABLE products (
     -- Names are stored normalized: uppercase, never empty, no leading or trailing spaces. The API
     -- trims and uppercases before saving.
     CONSTRAINT products_name_normalized CHECK (name <> '' AND name = upper(btrim(name))),
+    -- Plain ASCII: a letter first, then only letters, digits, spaces and - & _.
+    CONSTRAINT products_name_characters CHECK (name ~ '^[A-Z][A-Z0-9 &_-]*$'),
     CONSTRAINT products_name_max_length CHECK (char_length(name) <= 50)
 )
 ```
 
-- "Blank" means empty or only whitespace, including Unicode spaces such as the no-break space
-  (U+00A0): in the API, `@Pattern` requires a character that is neither `\p{javaWhitespace}` nor
-  `\p{Z}`; in the UI, the same character set as a regex in `validation/productName.ts`.
-  `@NotBlank` (`String.isBlank()`) isn't used because it lets no-break spaces through. The length
-  is checked only after the name passes (`@GroupSequence`), so a blank name gets exactly one error. The API trims with `String.strip()`, which removes only characters the
-  blank check also rejects, so a name that passes validation is never stored empty.
+- "Blank" means empty or only Java whitespace (`Character.isWhitespace`): the API uses `@NotBlank`
+  (`String.isBlank()`), kept simple on purpose; the UI's regex in `validation/productName.ts`
+  matches exactly the same whitespace characters. A name that isn't blank must also pass the
+  allowed-characters rule (decision 12), so no-break or zero-width spaces never get through.
+  Accepted trade-off: a name that fails more than one rule (e.g. a blank name with a tab, or over
+  50 characters) gets every error, in no fixed order; the UI checks blank first and shows one.
+  The API trims with `String.strip()`; validation lets through only spaces as whitespace, so that
+  removes just the leading and trailing spaces, and a valid name, which always starts with a
+  letter, is never stored empty.
 - Names are stored **normalized**: the API trims and uppercases (`toUpperCase(Locale.ROOT)`, so the
-  result doesn't depend on the server's locale); whitespace
-  between words is kept. `products_name_normalized` rejects anything else. Names are not unique
-  (decision 9).
+  result doesn't depend on the server's locale); spaces between words are kept.
+  `products_name_normalized` rejects anything else. Names are not unique (decision 9).
 - Flyway runs at startup (and for each test context against Testcontainers).
 - `spring.jpa.hibernate.ddl-auto=validate`: Hibernate only checks the entity against the migrated
   schema; it never creates or alters tables.
 - Applied migrations are never edited; changes go in `V2__...`. One exception, before any release:
-  V1 was edited in place to drop the unique name constraint (decision 9), so a database that ran
-  the old V1 must be reset (`docker compose down -v`) or Flyway stops on a checksum mismatch.
+  V1 was edited in place to drop the unique name constraint (decision 9) and to add
+  `products_name_characters` (decision 12), so a database that ran an earlier V1 must be reset
+  (`docker compose down -v`) or Flyway stops on a checksum mismatch.
 
 **Id generation.** Postgres assigns the id via the `uuidv7()` default. The entity never sets it:
 
@@ -409,7 +416,7 @@ Backend (versions managed by Spring Boot; nothing pinned by hand):
 |---|---|---|
 | `spring-boot-starter-webmvc` | implementation | REST controllers, JSON, `ProblemDetail` |
 | `spring-boot-starter-data-jpa` | implementation | entity mapping and repository |
-| `spring-boot-starter-validation` | implementation | `@Valid`, `@NotNull`, `@Pattern`, `@Size` |
+| `spring-boot-starter-validation` | implementation | `@Valid`, `@NotBlank`, `@Pattern`, `@Size` |
 | `spring-boot-starter-flyway` + `flyway-database-postgresql` | implementation | migrations at startup; Postgres support is a separate module |
 | `postgresql` | runtimeOnly | JDBC driver |
 | `spring-boot-starter-webmvc-test` | test | `@WebMvcTest`, `MockMvc`, JUnit, AssertJ, Mockito |
@@ -440,7 +447,8 @@ framework or browser-test framework.
 | The list shows all saved products | S2.1 | S2.2 |
 | Creating `P1` adds it to the list | S1.1 + S2.1 | S2.3 |
 | A product without a name is rejected | S1.2 (API and database) | S1.5 |
-| A name matching an existing one is accepted (names are not unique, decision 9) | `ProductsApiIntegrationTest` (` p1 ` after `P1` → two `P1` rows with different ids) | create ` p1 ` after `P1` in the browser → two `P1` rows |
+| A name that, after trimming leading and trailing spaces, doesn't start with an ASCII letter, or contains anything other than ASCII letters, digits, spaces and `-` `&` `_`, is rejected (decision 12) | `ProductControllerTest` (400 with one error; `"  Salt & Pepper-T_2  "` accepted), `ProductsApiIntegrationTest` (stored as `SALT & PEPPER-T_2`; DB rejects `1P`, `KID'S CHAIR`, `CAFÉ`, …) | submit `1P` in the browser → red allowed-characters message |
+| A name matching an existing one is accepted (names are not unique, decision 9) | `ProductsApiIntegrationTest` (` p1 ` after `P1` → two `P1` rows with different ids, both listed newest first) | create ` p1 ` after `P1` in the browser → two `P1` rows |
 | Each product gets an auto-generated id | S1.1 | `psql` |
 | Products are still listed after a restart | — | Slice 2 restart check |
 | A fresh clone runs by following the README | — | Slice 2 fresh-clone check |
@@ -453,8 +461,8 @@ Points INTENT.md leaves unspecified:
    `controller`, `service`, `repository`, `entity` (JPA entities), `model` (request/response
    records), `exception` (domain exceptions), `handler` (`@RestControllerAdvice`). Tests mirror them;
    the API → DB integration test sits in the root package.
-2. **"Without a name":** missing, `null`, empty and whitespace-only names (Unicode spaces such as
-   U+00A0 included) are rejected in the UI and at the API. The database rejects `null`, empty names and leading/trailing spaces
+2. **"Without a name":** missing, `null`, empty and whitespace-only names (Java whitespace) are
+   rejected in the UI and at the API with "Name is required". The database rejects `null`, empty names and leading/trailing spaces
    (`not null` + `check`; `btrim` without arguments trims only spaces, which is enough because the
    API always trims before saving).
 3. **List order:** newest first, determined by id order (`ORDER BY id DESC`): a UUID v7 starts
@@ -467,18 +475,27 @@ Points INTENT.md leaves unspecified:
    reason is the field error, the API's `detail`, or a generic message.
 8. **API versioning:** major version in the path (`/api/v1/products`); only a breaking change gets
    `/api/v2`, and additive changes stay in v1.
-9. **Name normalization; names are not unique:** names are trimmed (leading/trailing whitespace)
-   and uppercased before saving; whitespace between words is kept (`"Some Product Name"` →
-   `"SOME PRODUCT NAME"`). The database enforces this (`CHECK`). Names are **not** unique: products
+9. **Name normalization; names are not unique:** leading and trailing spaces are trimmed
+   and names uppercased before saving; spaces between words are kept (`"Some Product Name"` →
+   `"SOME PRODUCT NAME"`). Other whitespace, such as tabs and line breaks, is rejected (decision
+   12). The database enforces this (`CHECK`). Names are **not** unique: products
    of different types can share a name and differ in size or dimensions, so creating `" p1 "` when
    `P1` exists adds a second `P1` with its own id.
 10. **Maximum name length:** 50 characters, counted as typed (before trimming): `@Size(max = 50)`
-    in the API (`400`, "Name must be at most 50 characters"), the same check in the UI, and
-    `CHECK (char_length(name) <= 50)` in the database. Product names are English, and all three
-    count one per character. Accepted edge case: a few non-English characters get longer when
-    uppercased (`ß` → `SS`), so a name near the limit can pass validation and then fail the
-    database check, which returns a generic `500`.
-11. **SQL in a name is data, not a threat:** names are saved through JPA with bound parameters, so
-    a name like `x'); DROP TABLE products; --` is stored as text and never executed (an
-    integration test proves it). There's no SQL keyword blocklist: it would reject real names
-    ("Select Chair", "Drop Leaf Table") and is easy to bypass. React escapes names when rendering.
+    in the API (`400`, "Name must not exceed 50 characters"), the same check in the UI, and
+    `CHECK (char_length(name) <= 50)` in the database. Names are ASCII only (decision 12), so all
+    three count one per character and uppercasing never changes the length.
+11. **SQL in a name:** quotes, parentheses and semicolons aren't allowed characters (decision 12), so
+    a name like `x'); DROP TABLE products; --` is rejected with `400` (an integration test proves
+    it). Names are also saved through JPA with bound parameters, so they're never run as SQL.
+    There's no SQL keyword blocklist: it would reject real names ("Select Chair", "Drop Leaf
+    Table"). React escapes names when rendering.
+12. **Allowed characters:** plain English ASCII. Leading and trailing spaces are trimmed first
+    (decision 9); then a name starts with a letter and contains only letters (`A-Z`, `a-z`),
+    digits, spaces and the symbols `-`, `&` and `_`; spaces between words are kept. `T-Shirt`,
+    `Salt & Pepper` and `Size_2` are accepted; `1P`, `-P1`, `Kid's Chair`, `4.5L Pot`, `Café`,
+    tabs and line breaks are rejected with `400` ("Name must start with a letter and contain only
+    letters, numbers, spaces and - & _"). API: `@Pattern(" *([A-Za-z][A-Za-z0-9 &_-]*)?")`, which
+    also accepts empty and spaces-only names so those get only the "required" error; UI: the same
+    regex in `validation/productName.ts`; database: `products_name_characters`
+    (`^[A-Z][A-Z0-9 &_-]*$` on the stored, uppercased name).

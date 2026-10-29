@@ -4,7 +4,5 @@ CREATE TABLE products (
     -- Names are stored normalized: uppercase, never empty, no leading or trailing spaces. The API
     -- trims and uppercases before saving.
     CONSTRAINT products_name_normalized CHECK (name <> '' AND name = upper(btrim(name))),
-    CONSTRAINT products_name_max_length CHECK (char_length(name) <= 50),
-    -- Because names are normalized, "P1", "p1" and " P1 " are the same name and can exist only once.
-    CONSTRAINT products_name_unique UNIQUE (name)
+    CONSTRAINT products_name_max_length CHECK (char_length(name) <= 50)
 )

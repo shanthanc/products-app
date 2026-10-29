@@ -1,6 +1,5 @@
 package com.shanthan.products.handler;
 
-import com.shanthan.products.exception.DuplicateProductNameException;
 import com.shanthan.products.model.FieldViolation;
 import jakarta.servlet.http.HttpServletRequest;
 import java.util.List;
@@ -51,13 +50,6 @@ public class ApiExceptionHandler extends ResponseEntityExceptionHandler {
 			log.warn("{} -> {}: {}", target, statusCode.value(), ex.getMessage());
 		}
 		return super.handleExceptionInternal(ex, body, headers, statusCode, request);
-	}
-
-	@ExceptionHandler(DuplicateProductNameException.class)
-	public ProblemDetail handleDuplicateName(DuplicateProductNameException ex, HttpServletRequest request) {
-		log.warn("{} {} -> {}: {}", request.getMethod(), request.getRequestURI(), HttpStatus.CONFLICT.value(),
-				ex.getMessage());
-		return ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, ex.getMessage());
 	}
 
 	@ExceptionHandler(Exception.class)

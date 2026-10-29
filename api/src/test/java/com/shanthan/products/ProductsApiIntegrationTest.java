@@ -110,19 +110,17 @@ class ProductsApiIntegrationTest {
 	}
 
 	@Test
-	void createRejectsANameThatIsTheSameAfterNormalization() throws Exception {
-		mockMvc.perform(post("/api/v1/products").contentType(MediaType.APPLICATION_JSON).content("""
-				{"name": "P1"}"""))
-				.andExpect(status().isCreated());
+	void createAllowsANameThatAlreadyExists() throws Exception {
+		for (String name : List.of("P1", " p1 ")) {
+			mockMvc.perform(post("/api/v1/products").contentType(MediaType.APPLICATION_JSON)
+					.content("{\"name\": \"" + name + "\"}"))
+					.andExpect(status().isCreated())
+					.andExpect(jsonPath("$.name").value("P1"));
+		}
 
-		mockMvc.perform(post("/api/v1/products").contentType(MediaType.APPLICATION_JSON).content("""
-				{"name": " p1 "}"""))
-				.andExpect(status().isConflict())
-				.andExpect(content().contentType(MediaType.APPLICATION_PROBLEM_JSON))
-				.andExpect(jsonPath("$.status").value(409))
-				.andExpect(jsonPath("$.detail").value("A product named P1 already exists."));
-
-		assertThat(jdbcClient.sql("select name from products").query(String.class).list()).containsExactly("P1");
+		List<Map<String, Object>> rows = jdbcClient.sql("select id, name from products").query().listOfRows();
+		assertThat(rows).hasSize(2).allSatisfy(row -> assertThat(row.get("name")).isEqualTo("P1"));
+		assertThat(rows.get(0).get("id")).isNotEqualTo(rows.get(1).get("id"));
 	}
 
 	// Names reach the database as bound parameters, never as SQL text, so SQL in a name is stored as plain text.
@@ -142,14 +140,6 @@ class ProductsApiIntegrationTest {
 		jdbcClient.sql("insert into products (name) values (?)").param("A".repeat(50)).update();
 
 		assertThatThrownBy(() -> jdbcClient.sql("insert into products (name) values (?)").param("B".repeat(51)).update())
-				.isInstanceOf(DataIntegrityViolationException.class);
-	}
-
-	@Test
-	void databaseRejectsADuplicateName() {
-		jdbcClient.sql("insert into products (name) values ('P1')").update();
-
-		assertThatThrownBy(() -> jdbcClient.sql("insert into products (name) values ('P1')").update())
 				.isInstanceOf(DataIntegrityViolationException.class);
 	}
 

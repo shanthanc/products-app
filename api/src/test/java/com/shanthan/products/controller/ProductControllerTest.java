@@ -11,7 +11,6 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-import com.shanthan.products.exception.DuplicateProductNameException;
 import com.shanthan.products.model.CreateProductRequest;
 import com.shanthan.products.model.ProductResponse;
 import com.shanthan.products.service.ProductService;
@@ -131,19 +130,6 @@ class ProductControllerTest {
 				.andExpect(jsonPath("$.status").value(415));
 
 		verifyNoInteractions(productService);
-	}
-
-	@Test
-	void createReturns409WhenTheNameAlreadyExists() throws Exception {
-		given(productService.create(any())).willThrow(new DuplicateProductNameException("P1", null));
-
-		mockMvc.perform(post("/api/v1/products").contentType(MediaType.APPLICATION_JSON).content("""
-				{"name": " p1 "}"""))
-				.andExpect(status().isConflict())
-				.andExpect(content().contentType(MediaType.APPLICATION_PROBLEM_JSON))
-				.andExpect(jsonPath("$.status").value(409))
-				.andExpect(jsonPath("$.detail").value("A product named P1 already exists."))
-				.andExpect(jsonPath("$.instance").value("/api/v1/products"));
 	}
 
 	@Test

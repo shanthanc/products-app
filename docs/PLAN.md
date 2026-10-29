@@ -37,7 +37,7 @@ products-app/
 │   └── PLAN.md
 ├── api/                       # Spring Boot on Java 25, single-module Gradle (Groovy DSL)
 │   ├── build.gradle
-│   ├── settings.gradle        # rootProject.name = 'products-api'
+│   ├── settings.gradle        # rootProject.name = 'products-app'
 │   ├── gradlew, gradlew.bat
 │   ├── gradle/wrapper/        # gradle-wrapper.jar + gradle-wrapper.properties (committed)
 │   └── src/
@@ -54,8 +54,6 @@ products-app/
 │       │   ├── model/
 │       │   │   ├── CreateProductRequest.java       # record(String name)
 │       │   │   └── ProductResponse.java            # record(UUID id, String name)
-│       │   ├── exception/
-│       │   │   └── DuplicateProductNameException.java  # domain exception → 409
 │       │   └── handler/
 │       │       └── ApiExceptionHandler.java        # one @RestControllerAdvice → ProblemDetail
 │       ├── main/resources/
@@ -67,7 +65,7 @@ products-app/
 │           ├── controller/
 │           │   └── ProductControllerTest.java      # @WebMvcTest, no Docker
 │           ├── service/
-│           │   └── ProductServiceTest.java         # name normalization, duplicate mapping, list in repository order; no Docker
+│           │   └── ProductServiceTest.java         # name normalization, list in repository order; no Docker
 │           └── handler/
 │               └── ApiExceptionHandlerTest.java    # @WebMvcTest + test-only controller, no Docker
 └── client/                    # Vite + React + TypeScript
@@ -200,7 +198,7 @@ Base path `/api/v1`. Requests and successful responses are `application/json`; e
 
 | Endpoint | Request | Success | Errors |
 |---|---|---|---|
-| `POST /api/v1/products` | `{"name": "P1"}` — only `name` is read; a client can't set `id` | `201`, `{"id": "<uuid v7>", "name": "P1"}`; the name comes back normalized (`" p1 "` → `"P1"`) | `400` missing/blank name, a name over 50 characters or malformed JSON, `409` name already exists (after normalization), `415` wrong content type, `500` unexpected |
+| `POST /api/v1/products` | `{"name": "P1"}` — only `name` is read; a client can't set `id` | `201`, `{"id": "<uuid v7>", "name": "P1"}`; the name comes back normalized (`" p1 "` → `"P1"`) | `400` missing/blank name, a name over 50 characters or malformed JSON, `415` wrong content type, `500` unexpected |
 | `GET /api/v1/products` | — | `200`, `[{"id": "...", "name": "..."}, ...]`, newest first; `[]` when empty | `500` unexpected |
 
 Error body (the UI relies on `status`, `detail` and, when present, `errors`):
@@ -215,13 +213,12 @@ Error body (the UI relies on `status`, `detail` and, when present, `errors`):
 }
 ```
 
-A 409 or 500 has the same shape without `errors`; a 500's `detail` is generic ("Something went
+A 500 has the same shape without `errors`; a 500's `detail` is generic ("Something went
 wrong. Please try again."). Spring leaves out `type` when it is the default `about:blank`.
 
 Implementation: one `@RestControllerAdvice` extending `ResponseEntityExceptionHandler`, which
-already renders Spring MVC errors as `ProblemDetail`. It adds `errors` for validation failures, a
-handler for duplicate names (409) and a catch-all for 500s. The handler logs each 4xx as one `WARN`
-line (a 409 is also preceded by Hibernate's own log lines for the failed insert). 5xx are logged as `ERROR` with the exception.
+already renders Spring MVC errors as `ProblemDetail`. It adds `errors` for validation failures and a
+catch-all for 500s. The handler logs each 4xx as one `WARN` line. 5xx are logged as `ERROR` with the exception.
 Nothing internal (exception messages, SQL, class names) reaches the response.
 
 ## Database
@@ -235,9 +232,7 @@ CREATE TABLE products (
     -- Names are stored normalized: uppercase, never empty, no leading or trailing spaces. The API
     -- trims and uppercases before saving.
     CONSTRAINT products_name_normalized CHECK (name <> '' AND name = upper(btrim(name))),
-    CONSTRAINT products_name_max_length CHECK (char_length(name) <= 50),
-    -- Because names are normalized, "P1", "p1" and " P1 " are the same name and can exist only once.
-    CONSTRAINT products_name_unique UNIQUE (name)
+    CONSTRAINT products_name_max_length CHECK (char_length(name) <= 50)
 )
 ```
 
@@ -249,14 +244,14 @@ CREATE TABLE products (
   blank check also rejects, so a name that passes validation is never stored empty.
 - Names are stored **normalized**: the API trims and uppercases (`toUpperCase(Locale.ROOT)`, so the
   result doesn't depend on the server's locale); whitespace
-  between words is kept. `products_name_normalized` rejects anything else, so `UNIQUE (name)` alone
-  makes "P1", "p1" and " P1 " the same name. A duplicate is caught by the constraint (not a prior
-  lookup), so concurrent creates can't both succeed. The service recognizes it by SQLState `23505`
-  (unique_violation) and it is returned as `409`.
+  between words is kept. `products_name_normalized` rejects anything else. Names are not unique
+  (decision 9).
 - Flyway runs at startup (and for each test context against Testcontainers).
 - `spring.jpa.hibernate.ddl-auto=validate`: Hibernate only checks the entity against the migrated
   schema; it never creates or alters tables.
-- Applied migrations are never edited; changes go in `V2__...`.
+- Applied migrations are never edited; changes go in `V2__...`. One exception, before any release:
+  V1 was edited in place to drop the unique name constraint (decision 9), so a database that ran
+  the old V1 must be reset (`docker compose down -v`) or Flyway stops on a checksum mismatch.
 
 **Id generation.** Postgres assigns the id via the `uuidv7()` default. The entity never sets it:
 
@@ -363,7 +358,7 @@ are added only if an environment needs different behavior, not just different va
 |---|---|---|
 | API contract and validation | `@WebMvcTest` + `MockMvc`, service mocked: status codes, error format, field errors, 500 masking | no |
 | API → DB | `@SpringBootTest` + Testcontainers Postgres: requests through the full stack, then assert on the table; database constraint checks | yes |
-| Service | `ProductServiceTest`, plain JUnit + Mockito: name normalization, mapping the unique-constraint violation to a duplicate-name error, and list mapping in repository order | no |
+| Service | `ProductServiceTest`, plain JUnit + Mockito: name normalization and list mapping in repository order | no |
 | UI | `npm run lint` + `npm run build` (type check); main flow checked manually per slice | — |
 
 Tests use a real Postgres (not H2, which has no `uuidv7()`):
@@ -445,7 +440,7 @@ framework or browser-test framework.
 | The list shows all saved products | S2.1 | S2.2 |
 | Creating `P1` adds it to the list | S1.1 + S2.1 | S2.3 |
 | A product without a name is rejected | S1.2 (API and database) | S1.5 |
-| A name matching an existing one (ignoring case and edge whitespace) is rejected | `ProductServiceTest` (duplicate → exception), `ProductControllerTest` (409), `ProductsApiIntegrationTest` (409 after normalization, DB rejects a duplicate) | create ` p1 ` after `P1` in the browser → red 409 message |
+| A name matching an existing one is accepted (names are not unique, decision 9) | `ProductsApiIntegrationTest` (` p1 ` after `P1` → two `P1` rows with different ids) | create ` p1 ` after `P1` in the browser → two `P1` rows |
 | Each product gets an auto-generated id | S1.1 | `psql` |
 | Products are still listed after a restart | — | Slice 2 restart check |
 | A fresh clone runs by following the README | — | Slice 2 fresh-clone check |
@@ -472,10 +467,11 @@ Points INTENT.md leaves unspecified:
    reason is the field error, the API's `detail`, or a generic message.
 8. **API versioning:** major version in the path (`/api/v1/products`); only a breaking change gets
    `/api/v2`, and additive changes stay in v1.
-9. **Name normalization and uniqueness:** names are trimmed (leading/trailing whitespace) and
-   uppercased before saving; whitespace between words is kept (`"Some Product Name"` →
-   `"SOME PRODUCT NAME"`). Normalized names are unique: creating `" p1 "` when `P1` exists returns
-   `409` ("A product named P1 already exists."). The database enforces both (`CHECK` + `UNIQUE`).
+9. **Name normalization; names are not unique:** names are trimmed (leading/trailing whitespace)
+   and uppercased before saving; whitespace between words is kept (`"Some Product Name"` →
+   `"SOME PRODUCT NAME"`). The database enforces this (`CHECK`). Names are **not** unique: products
+   of different types can share a name and differ in size or dimensions, so creating `" p1 "` when
+   `P1` exists adds a second `P1` with its own id.
 10. **Maximum name length:** 50 characters, counted as typed (before trimming): `@Size(max = 50)`
     in the API (`400`, "Name must be at most 50 characters"), the same check in the UI, and
     `CHECK (char_length(name) <= 50)` in the database. Product names are English, and all three
